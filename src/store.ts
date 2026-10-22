@@ -241,7 +241,14 @@ export function newMediaItem(src: string, kind: MediaKind, w: number, h: number,
     x, y, w: w * fit, h: h * fit,
     crop: { l: 0, t: 0, r: 1, b: 1 },
     // Aim for a working resolution of ~480px so new items look chunky right away.
-    dither: { ...DEFAULT_DITHER, pixelSize: Math.max(1, Math.round(longest / 480)), patternSize: Math.max(4, Math.round(longest / 90)) },
+    dither: {
+      ...DEFAULT_DITHER,
+      // About 240 dither cells along the long side: visible, deliberate pixels rather than grain.
+      pixelSize: Math.max(1, Math.round(longest / 240)),
+      patternSize: Math.max(4, Math.round(longest / 110)),
+      // About 70 text rows along the long side.
+      asciiCell: Math.max(3, Math.round(longest / 70)),
+    },
     exportScale: 1,
   }
 }

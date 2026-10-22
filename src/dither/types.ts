@@ -64,9 +64,51 @@ export const styleDef = (id: StyleId) => STYLES.find((s) => s.id === id) ?? STYL
 
 export type ColorMode = 'mono' | 'original' | 'palette'
 
+export type RenderMode = 'dither' | 'ascii'
+export type CellShape = 'square' | 'dot' | 'rounded' | 'diamond'
+export type AsciiFont = 'mono' | 'pixel' | 'gothic' | 'rounded'
+
+export interface AsciiSetDef { id: string; label: string; chars: string }
+
+/** Character sets; order doesn't matter, glyphs are ranked by measured ink coverage. */
+export const ASCII_SETS: AsciiSetDef[] = [
+  { id: 'classic', label: 'Clássico', chars: ' .:-=+*#%@' },
+  { id: 'detailed', label: 'Detalhado', chars: ` .'\`^",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$` },
+  { id: 'blocks', label: 'Blocos', chars: ' ░▒▓█' },
+  { id: 'braille', label: 'Braille', chars: ' ⠁⠃⠇⡇⡏⡟⡿⣿⠿⠛⠉' },
+  { id: 'geometric', label: 'Geométrico', chars: ' ·∘○◌◍◎●◆■' },
+  { id: 'arrows', label: 'Setas', chars: ' ·→↗↑⇡⇧⇑⬆' },
+  { id: 'binary', label: 'Binário', chars: ' 01' },
+  { id: 'kana', label: 'Matrix', chars: ' ･ｰｼﾂﾆﾄﾈﾒﾖﾛﾜﾊﾐ' },
+  { id: 'medieval', label: 'Medieval', chars: ' .·:†‡✝☩✠⚔' },
+  { id: 'stars', label: 'Estrelas', chars: ' .·*✦✧★✶✷✸' },
+  { id: 'custom', label: 'Seu texto', chars: '' },
+]
+
 export interface DitherSettings {
+  /** Dither or ASCII; both share colour, adjust and effects settings. */
+  mode: RenderMode
+  asciiSet: string
+  asciiCustom: string
+  /** Repeat the custom text in reading order instead of picking glyphs by density. */
+  asciiSequence: boolean
+  asciiFont: AsciiFont
+  asciiBold: boolean
+  /** Character cell size, in source pixels. */
+  asciiCell: number
+  asciiBg: string
+  asciiTransparent: boolean
   enabled: boolean
   style: StyleId
+  /** How each dither cell is drawn: a plain square, or a shape with a gap around it (LED / dot-matrix look). */
+  cellShape: CellShape
+  /** Gap between cells, as a fraction of the cell (0 = touching). */
+  cellGap: number
+  /** Stretch the image's tones to full black/white before dithering. */
+  autoContrast: boolean
+  /** Internal: black/white points measured from the source when autoContrast is on. */
+  _lo?: number
+  _hi?: number
   /** Size of one dither cell, in source pixels. */
   pixelSize: number
   /** Size of halftone / line cells, in source pixels. */
@@ -103,7 +145,11 @@ export interface DitherSettings {
 }
 
 export const FX_KEYS = ['glow', 'blur', 'chroma', 'scanlines', 'mask', 'wave', 'vignette', 'grain'] as const
-export const hasFx = (s: DitherSettings) => FX_KEYS.some((k) => (s[k] ?? 0) > 0)
+export const PATTERN_STYLES: StyleId[] = ['halftone', 'lines', 'cross']
+/** Cell shapes only make sense when a cell is one flat colour: not for ASCII or pattern screens. */
+export const hasCellShape = (s: DitherSettings) =>
+  s.mode !== 'ascii' && !PATTERN_STYLES.includes(s.style) && ((s.cellShape ?? 'square') !== 'square' || (s.cellGap ?? 0) > 0)
+export const hasFx = (s: DitherSettings) => FX_KEYS.some((k) => (s[k] ?? 0) > 0) || hasCellShape(s)
 
 export const FX_OFF = {
   glow: 0, glowRadius: 12, glowThreshold: 0.45, blur: 0, chroma: 0, scanlines: 0, scanlineSize: 4,
@@ -136,16 +182,28 @@ export const PALETTES: PaletteDef[] = [
 ]
 
 export const DEFAULT_DITHER: DitherSettings = {
+  mode: 'dither',
+  asciiSet: 'classic',
+  asciiCustom: 'PARADISE',
+  asciiSequence: false,
+  asciiFont: 'mono',
+  asciiBold: true,
+  asciiCell: 8,
+  asciiBg: '#000000',
+  asciiTransparent: false,
   enabled: true,
   style: 'bayer4',
-  pixelSize: 2,
-  patternSize: 8,
+  cellShape: 'square',
+  cellGap: 0,
+  autoContrast: true,
+  pixelSize: 3,
+  patternSize: 7,
   angle: 45,
   intensity: 1,
   mix: 1,
-  colorMode: 'original',
-  levels: 3,
-  dark: '#1b1b2f',
+  colorMode: 'mono',
+  levels: 2,
+  dark: '#111114',
   light: '#f4f1ea',
   paletteId: 'gameboy',
   palette: PALETTES[0].colors,

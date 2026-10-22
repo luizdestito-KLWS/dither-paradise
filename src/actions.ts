@@ -1,4 +1,5 @@
 import { zipSync } from 'fflate'
+import { asciiText } from './dither/ascii'
 import { outputSize, renderItem } from './dither/render'
 import { getMedia, loadFile } from './media'
 import { blip } from './sound'
@@ -262,5 +263,37 @@ export async function exportItems(ids?: string[]) {
     store.showToast('Erro ao exportar: ' + (e as Error).message)
   } finally {
     store.setJob(null)
+  }
+}
+
+/** Saves the ASCII render of each item as a plain-text file (one character per cell). */
+export async function exportAsciiText(ids: string[]) {
+  const store = useStore.getState()
+  const list = store.items.filter((i) => isMedia(i) && ids.includes(i.id))
+  const used = new Set<string>()
+  const files = list.flatMap((it) => {
+    const m = getMedia(it.src)
+    if (!m) return []
+    const text = asciiText(m.el, it.crop.l * m.w, it.crop.t * m.h, (it.crop.r - it.crop.l) * m.w, (it.crop.b - it.crop.t) * m.h, it.dither)
+    let name = `${it.name}-ascii.txt`, n = 2
+    while (used.has(name)) name = `${it.name}-ascii-${n++}.txt`
+    used.add(name)
+    return [{ name, blob: new Blob([text], { type: 'text/plain;charset=utf-8' }) }]
+  })
+  if (!files.length) return
+  try {
+    if (isDesktop()) {
+      if (!(await deliverNative(files))) return store.showToast('Exportação cancelada')
+    } else if (files.length === 1) {
+      download(files[0].blob, files[0].name)
+    } else {
+      const entries: Record<string, Uint8Array> = {}
+      for (const f of files) entries[f.name] = new Uint8Array(await f.blob.arrayBuffer())
+      download(new Blob([zipSync(entries)], { type: 'application/zip' }), 'dither-paradise-ascii.zip')
+    }
+    blip('done')
+    store.showToast(`${files.length} ${files.length === 1 ? 'texto salvo' : 'textos salvos'} ✦`)
+  } catch (e) {
+    store.showToast('Erro ao exportar: ' + (e as Error).message)
   }
 }

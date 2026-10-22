@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { displayCanvases, importFiles, pickFiles, zoomBy } from '../actions'
 import { renderItem } from '../dither/render'
+import { fontEpoch } from '../dither/ascii'
 import { getMedia, samplePixel } from '../media'
 import { blip } from '../sound'
 import { Item, isMedia, newTextItem, useStore } from '../store'
@@ -37,7 +38,7 @@ function useRenderLoop() {
         const cmp = compare && selected.includes(it.id)
         const frame = m.kind === 'video' ? `${m.frame}:${(m.el as HTMLVideoElement).currentTime}`
           : m.kind === 'gif' ? Math.floor(performance.now() / 50) : 0
-        const sig = JSON.stringify([it.dither, it.crop, it.exportScale, maxDim, cmp, frame])
+        const sig = JSON.stringify([it.dither, it.crop, it.exportScale, maxDim, cmp, frame, fontEpoch])
         if (last.get(it.id) !== sig) {
           try { renderItem(it, c, { maxDim, compare: cmp }) } catch (e) { console.error(e) }
           last.set(it.id, sig)

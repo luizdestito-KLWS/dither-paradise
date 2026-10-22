@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { displayCanvases, exportItems, pickFiles } from '../actions'
+import { displayCanvases, exportAsciiText, exportItems, pickFiles } from '../actions'
+import { fontEpoch } from '../dither/ascii'
 import { outputSize, renderItem } from '../dither/render'
-import { DEFAULT_DITHER, DitherSettings, FX_OFF, PALETTES, STYLES, StyleGroup, StyleId, styleDef } from '../dither/types'
+import { ASCII_SETS, AsciiFont, CellShape, DEFAULT_DITHER, DitherSettings, FX_OFF, PALETTES, STYLES, StyleGroup, StyleId, styleDef } from '../dither/types'
 import { getMedia } from '../media'
 import { blip } from '../sound'
 import { Item, Tab, isMedia, useStore } from '../store'
@@ -45,30 +46,175 @@ const SAMPLE = (() => {
 })()
 
 function StyleTile({ item, style, active, onPick }: { item: Item; style: StyleId; active: boolean; onPick: () => void }) {
+  return <PreviewTile item={item} override={{ style, mode: 'dither', enabled: true }} label={styleDef(style).label} active={active} onPick={onPick} />
+}
+
+function PreviewTile({ item, override, label, active, onPick }: {
+  item: Item; override: Partial<DitherSettings>; label: string; active: boolean; onPick: () => void
+}) {
   const ref = useRef<HTMLCanvasElement>(null)
-  const sig = JSON.stringify([item.src, item.crop, { ...item.dither, style: undefined }])
+  const sig = JSON.stringify([item.src, item.crop, item.dither, override, fontEpoch])
   useEffect(() => {
     const c = ref.current
     if (!c) return
     const raf = requestAnimationFrame(() => {
-      const ok = getMedia(item.src) && renderItem(item, c, { maxDim: 112, pxMin: 2, noFx: true, override: { style, enabled: true } })
+      const ok = getMedia(item.src) && renderItem(item, c, { maxDim: 112, pxMin: 2, noFx: true, override })
       if (!ok) { c.width = 96; c.height = 96; c.getContext('2d')!.drawImage(SAMPLE, 0, 0) }
     })
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, style])
+  }, [sig])
   return (
     <button className={'style-tile' + (active ? ' active' : '')} onClick={() => { blip('select'); onPick() }}>
       <span className="style-thumb"><canvas ref={ref} /></span>
-      <span className="style-name">{styleDef(style).label}</span>
+      <span className="style-name">{label}</span>
       {active && <Brackets tight />}
     </button>
   )
 }
 
+function ModeSwitch({ list }: { list: Item[] }) {
+  const { d, commit, mixed } = useDitherEdit(list)
+  return (
+    <Seg value={mixed('mode') ? null : (d.mode ?? 'dither')} onChange={(v) => commit({ mode: v, enabled: true })} options={[
+      { value: 'dither', label: 'Dither', icon: <IconDither size={14} /> },
+      { value: 'ascii', label: 'ASCII', icon: <span className="ascii-glyph">A</span> },
+    ]} />
+  )
+}
+
+/** One-click looks. `cells` is how many dither cells span the image's long side, so they suit any size. */
+const RECIPES: { name: string; cells?: number; screen?: number; d: Partial<DitherSettings> }[] = [
+  { name: 'Gravura', cells: 720, d: { style: 'atkinson', colorMode: 'mono', levels: 2, dark: '#000000', light: '#ffffff', cellShape: 'square', cellGap: 0 } },
+  { name: 'Painel LED', cells: 120, d: { style: 'bayer2', colorMode: 'mono', levels: 2, dark: '#000000', light: '#ffffff', cellShape: 'square', cellGap: 0.35 } },
+  { name: 'Céu de pontos', cells: 150, d: { style: 'bayer4', colorMode: 'palette', paletteId: 'night', palette: ['#0b1033', '#1b3f9e', '#2f7ae0', '#7cc8f5', '#f2fbff'], cellShape: 'dot', cellGap: 0.2 } },
+  { name: 'Azulejo', cells: 150, d: { style: 'bayer4', colorMode: 'palette', paletteId: 'tile', palette: ['#0a2a8a', '#2a6fd6', '#56c2f0', '#bdf0ff', '#ffffff'], cellShape: 'square', cellGap: 0.3 } },
+  { name: 'Jornal', screen: 105, d: { style: 'halftone', colorMode: 'mono', levels: 2, dark: '#2b2b2b', light: '#f4f2ec', angle: 45 } },
+  { name: 'Game Boy', cells: 160, d: { style: 'bayer4', colorMode: 'palette', paletteId: 'gameboy', palette: PALETTES[0].colors, cellShape: 'square', cellGap: 0.12 } },
+  { name: 'Neon CRT', cells: 200, d: { style: 'bayer8', colorMode: 'palette', paletteId: 'fire', palette: ['#050000', '#3a0a00', '#ff3c1e', '#ffb000', '#fff3a0'], cellShape: 'square', cellGap: 0.15, glow: 1.3, glowRadius: 14, glowThreshold: 0.3, scanlines: 0.35, scanlineSize: 4, vignette: 0.4 } },
+]
+
+function RecipeRow({ list }: { list: Item[] }) {
+  const apply = (r: typeof RECIPES[number]) => {
+    const st = useStore.getState()
+    st.pushHistory()
+    st.updateItems(list.filter(isMedia).map((i) => i.id), (it) => {
+      const longest = Math.max(it.natW * (it.crop.r - it.crop.l), it.natH * (it.crop.b - it.crop.t))
+      return {
+        dither: {
+          ...it.dither, ...FX_OFF, mode: 'dither', enabled: true, autoContrast: true, mix: 1, intensity: 1, ...r.d,
+          ...(r.cells ? { pixelSize: Math.max(1, Math.round(longest / r.cells)) } : {}),
+          ...(r.screen ? { patternSize: Math.max(3, Math.round(longest / r.screen)) } : {}),
+        },
+      }
+    })
+    blip('select')
+  }
+  return (
+    <div className="recipes">
+      <h4 className="group-title">Receitas</h4>
+      <div className="fx-presets">
+        {RECIPES.map((r) => (
+          <button key={r.name} className="fx-chip" onClick={() => apply(r)}><IconSparkle size={12} />{r.name}</button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PresetRow({ d }: { d: DitherSettings }) {
+  const presets = useStore((s) => s.presets)
+  return (
+    <div className="presets">
+      <h4 className="group-title">Meus estilos</h4>
+      <div className="preset-row">
+        {presets.map((p) => (
+          <span key={p.id} className="preset-chip">
+            <button onClick={() => { blip('select'); useStore.getState().applyPreset(p.id) }} title="Aplicar aos selecionados">
+              <IconStar size={12} />{p.name}
+            </button>
+            <button className="x" onClick={() => useStore.getState().deletePreset(p.id)} aria-label={'Apagar ' + p.name}>×</button>
+          </span>
+        ))}
+        <button className="preset-add" onClick={() => {
+          const base = d.mode === 'ascii' ? 'ASCII' : styleDef(d.style).label
+          const name = prompt('Nome do estilo', `${base} ${presets.length + 1}`)
+          if (name) { useStore.getState().savePreset(name, d); blip('pop') }
+        }}><IconPlus size={12} /> Salvar atual</button>
+      </div>
+    </div>
+  )
+}
+
+const ASCII_FONTS: { value: AsciiFont; label: string }[] = [
+  { value: 'mono', label: 'Mono' }, { value: 'pixel', label: 'Pixel' },
+  { value: 'gothic', label: 'Gótica' }, { value: 'rounded', label: 'Redonda' },
+]
+
+function AsciiTab({ list }: { list: Item[] }) {
+  const { media, d, set, commit, mixed } = useDitherEdit(list)
+  const custom = d.asciiSet === 'custom'
+  return (
+    <div className="panel two-col">
+      <div className="col style-col">
+        <ModeSwitch list={list} />
+        <div className="scroll">
+          <div className="style-grid">
+            {ASCII_SETS.map((a) => (
+              <PreviewTile key={a.id} item={media[0]} label={a.label}
+                override={{ mode: 'ascii', asciiSet: a.id, enabled: true }}
+                active={!mixed('asciiSet') && d.asciiSet === a.id}
+                onPick={() => commit({ asciiSet: a.id, mode: 'ascii', enabled: true })} />
+            ))}
+          </div>
+          {custom && (
+            <div className="custom-chars">
+              <label className="field">
+                <span>Seus caracteres</span>
+                <input value={d.asciiCustom} maxLength={120} placeholder="Ex.: seu nome, ✦★♥, 01…"
+                  onFocus={() => useStore.getState().pushHistory()} onChange={(e) => set({ asciiCustom: e.target.value })} />
+              </label>
+              <Toggle label="Repetir em sequência (como texto)" on={d.asciiSequence} mixed={mixed('asciiSequence')} onChange={(v) => set({ asciiSequence: v })} />
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="col controls">
+        <Slider label="Tamanho da célula" value={d.asciiCell ?? 8} min={2} max={64} step={1} def={8} mixed={mixed('asciiCell')}
+          format={(v) => v + 'px'} onChange={(v) => set({ asciiCell: v })} />
+        <Seg value={mixed('asciiFont') ? null : d.asciiFont} onChange={(v) => commit({ asciiFont: v })} options={ASCII_FONTS} />
+        <div className="row">
+          <Toggle label="Negrito" on={d.asciiBold} mixed={mixed('asciiBold')} onChange={(v) => set({ asciiBold: v })} />
+          <Toggle label="Fundo transparente" on={d.asciiTransparent} mixed={mixed('asciiTransparent')} onChange={(v) => set({ asciiTransparent: v })} />
+        </div>
+        {!d.asciiTransparent && (
+          <div className="row bg-row">
+            <Diamond color={d.asciiBg} size={24} title="Cor de fundo" onChange={(c) => set({ asciiBg: c })} />
+            <span className="hint">Fundo · a cor dos caracteres vem da aba Cor</span>
+          </div>
+        )}
+        <Slider label="Mistura com original" value={d.mix} min={0} max={1} step={0.01} def={1} mixed={mixed('mix')} format={pct} onChange={(v) => set({ mix: v })} />
+        <div className="row">
+          <Pill onClick={() => exportAsciiText(media.map((m) => m.id))} title="Salvar os caracteres como arquivo de texto">
+            <IconText size={14} /> Exportar .txt
+          </Pill>
+        </div>
+        <PresetRow d={d} />
+      </div>
+    </div>
+  )
+}
+
+const CELL_SHAPES: { value: CellShape; label: string; icon: ReactNode }[] = [
+  { value: 'square', label: 'Quadrado', icon: <i className="shape-ico sq" /> },
+  { value: 'dot', label: 'Ponto', icon: <i className="shape-ico dot" /> },
+  { value: 'rounded', label: 'Arredondado', icon: <i className="shape-ico rnd" /> },
+  { value: 'diamond', label: 'Losango', icon: <i className="shape-ico dia" /> },
+]
+
 function DitherTab({ list }: { list: Item[] }) {
   const { media, d, set, commit, mixed } = useDitherEdit(list)
-  const presets = useStore((s) => s.presets)
+  if (d.mode === 'ascii') return <AsciiTab list={list} />
   const groups: StyleGroup[] = ['Ordenado', 'Padrão', 'Ruído', 'Difusão', 'Especial']
   const isPattern = ['halftone', 'lines', 'cross'].includes(d.style)
   const sameStyle = !mixed('style')
@@ -81,6 +227,7 @@ function DitherTab({ list }: { list: Item[] }) {
   return (
     <div className="panel two-col">
       <div className="col style-col">
+        <ModeSwitch list={list} />
         <nav className="group-chips">
           {groups.map((g) => (
             <button key={g} onClick={() => jump(g)}
@@ -104,6 +251,7 @@ function DitherTab({ list }: { list: Item[] }) {
         </div>
       </div>
       <div className="col controls">
+        <RecipeRow list={list} />
         <Toggle label="Dither ligado" on={d.enabled} mixed={mixed('enabled')} onChange={(v) => set({ enabled: v })} />
         {isPattern ? (
           <>
@@ -111,27 +259,17 @@ function DitherTab({ list }: { list: Item[] }) {
             <Slider label="Ângulo" value={d.angle} min={0} max={90} def={45} mixed={mixed('angle')} format={(v) => v + '°'} onChange={(v) => set({ angle: v })} />
           </>
         ) : (
-          <Slider label="Tamanho do pixel" value={d.pixelSize} min={1} max={32} def={2} mixed={mixed('pixelSize')} format={(v) => v + 'px'} onChange={(v) => set({ pixelSize: v })} />
+          <>
+            <Slider label="Tamanho do pixel" value={d.pixelSize} min={1} max={32} def={3} mixed={mixed('pixelSize')} format={(v) => v + 'px'} onChange={(v) => set({ pixelSize: v })} />
+            <div className="shape-row">
+              <Seg value={mixed('cellShape') ? null : (d.cellShape ?? 'square')} onChange={(v) => commit({ cellShape: v, cellGap: v !== 'square' && !(d.cellGap > 0) ? 0.25 : d.cellGap })} options={CELL_SHAPES} />
+            </div>
+            <Slider label="Espaço entre pixels" value={d.cellGap ?? 0} min={0} max={0.7} step={0.01} def={0} mixed={mixed('cellGap')} format={pct} onChange={(v) => set({ cellGap: v })} />
+          </>
         )}
         <Slider label="Intensidade" value={d.intensity} min={0} max={1} step={0.01} def={1} mixed={mixed('intensity')} format={pct} onChange={(v) => set({ intensity: v })} />
         <Slider label="Mistura com original" value={d.mix} min={0} max={1} step={0.01} def={1} mixed={mixed('mix')} format={pct} onChange={(v) => set({ mix: v })} />
-        <div className="presets">
-          <h4 className="group-title">Meus estilos</h4>
-          <div className="preset-row">
-            {presets.map((p) => (
-              <span key={p.id} className="preset-chip">
-                <button onClick={() => { blip('select'); useStore.getState().applyPreset(p.id) }} title="Aplicar aos selecionados">
-                  <IconStar size={12} />{p.name}
-                </button>
-                <button className="x" onClick={() => useStore.getState().deletePreset(p.id)} aria-label={'Apagar ' + p.name}>×</button>
-              </span>
-            ))}
-            <button className="preset-add" onClick={() => {
-              const name = prompt('Nome do estilo', `${styleDef(d.style).label} ${presets.length + 1}`)
-              if (name) { useStore.getState().savePreset(name, d); blip('pop') }
-            }}><IconPlus size={12} /> Salvar atual</button>
-          </div>
-        </div>
+        <PresetRow d={d} />
       </div>
     </div>
   )
@@ -243,6 +381,7 @@ function AdjustTab({ list }: { list: Item[] }) {
         <Slider label="Gama" value={d.gamma} min={0.3} max={3} step={0.01} def={1} mixed={mixed('gamma')} format={(v) => v.toFixed(2)} onChange={(v) => set({ gamma: v })} />
         <Slider label="Saturação" value={d.saturation} min={0} max={2} step={0.01} def={1} mixed={mixed('saturation')} format={pct} onChange={(v) => set({ saturation: v })} />
         <div className="row">
+          <Toggle label="Contraste automático" on={d.autoContrast ?? true} mixed={mixed('autoContrast')} onChange={(v) => set({ autoContrast: v })} />
           <Toggle label="Inverter" on={d.invert} mixed={mixed('invert')} onChange={(v) => set({ invert: v })} />
           <Pill onClick={() => commit({ brightness: 0, contrast: 0, gamma: 1, saturation: 1, invert: false })}>Resetar tom</Pill>
         </div>
@@ -434,7 +573,8 @@ function HomeThumb({ it }: { it: Item }) {
       const s = Math.min(1, 160 / Math.max(src.width, src.height))
       c.width = Math.max(1, src.width * s); c.height = Math.max(1, src.height * s)
       const g = c.getContext('2d')!
-      g.imageSmoothingEnabled = false
+      g.imageSmoothingEnabled = true
+      g.imageSmoothingQuality = 'high'
       g.drawImage(src, 0, 0, c.width, c.height)
     }
     copy()

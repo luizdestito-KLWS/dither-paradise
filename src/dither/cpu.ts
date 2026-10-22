@@ -50,7 +50,8 @@ const workCtx = work.getContext('2d', { willReadFrequently: true })!
 export function adjustRGB(r: number, g: number, b: number, s: DitherSettings): [number, number, number] {
   const ig = 1 / s.gamma
   const k = 1 + s.contrast
-  let c = [r, g, b].map((v) => (Math.pow(Math.max(v, 0), ig) - 0.5) * k + 0.5 + s.brightness)
+  const lo = s._lo ?? 0, span = Math.max(0.02, (s._hi ?? 1) - lo)
+  let c = [r, g, b].map((v) => (Math.pow(Math.max((v - lo) / span, 0), ig) - 0.5) * k + 0.5 + s.brightness)
   const l = c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114
   c = c.map((v) => Math.min(1, Math.max(0, l + (v - l) * s.saturation)))
   if (s.invert) c = c.map((v) => 1 - v)

@@ -4,11 +4,14 @@ import '@fontsource/m-plus-rounded-1c/500.css'
 import '@fontsource/m-plus-rounded-1c/700.css'
 import '@fontsource/m-plus-rounded-1c/800.css'
 import '@fontsource/dotgothic16/400.css'
+import '@fontsource/unifrakturmaguntia/400.css'
 import './styles.css'
 import { App } from './App'
 import { applyTheme, useStore } from './store'
+import { preloadAsciiFonts } from './dither/ascii'
 
 applyTheme(useStore.getState().theme)
+preloadAsciiFonts()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

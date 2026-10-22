@@ -1,4 +1,4 @@
-import type { DitherSettings } from './types'
+import { DitherSettings, hasCellShape, hexToRgb } from './types'
 
 /**
  * Post effects that run on the dithered frame: wave distortion, chromatic aberration,
@@ -21,6 +21,28 @@ out vec4 o;
 uniform sampler2D uTex;
 uniform vec2 uSize;
 `
+
+/** Redraws each flat-colour dither cell as a square, dot, rounded square or diamond on the gap colour. */
+const SHAPE = HEAD + `
+uniform vec2 uCellPx;
+uniform float uShape, uGap;
+uniform vec3 uGapColor;
+float sdBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+void main() {
+  vec2 p = vUv * uSize;
+  vec2 cell = floor(p / uCellPx);
+  vec2 local = (p - cell * uCellPx) / uCellPx - 0.5;
+  vec3 c = texture(uTex, (cell + 0.5) * uCellPx / uSize).rgb;
+  float half_ = 0.5 * (1.0 - uGap);
+  float d;
+  if (uShape < 0.5) d = sdBox(local, vec2(half_), 0.0);
+  else if (uShape < 1.5) d = length(local) - half_;
+  else if (uShape < 2.5) d = sdBox(local, vec2(half_), half_ * 0.5);
+  else d = (abs(local.x) + abs(local.y)) * 0.7071 - half_ * 0.7071;
+  float aa = 0.75 / min(uCellPx.x, uCellPx.y);
+  float m = 1.0 - smoothstep(-aa, aa, d);
+  o = vec4(mix(uGapColor, c, m), 1.0);
+}`
 
 const PREP = HEAD + `
 uniform float uAmp, uPeriod, uChroma;
@@ -105,7 +127,7 @@ class GLFx {
     const gl = this.canvas.getContext('webgl2', { preserveDrawingBuffer: true, premultipliedAlpha: false })
     if (!gl) throw new Error('WebGL2 indisponível')
     this.gl = gl
-    for (const [name, fs] of Object.entries({ PREP, BRIGHT, BLUR, COMPOSITE })) this.progs[name] = this.compile(fs)
+    for (const [name, fs] of Object.entries({ SHAPE, PREP, BRIGHT, BLUR, COMPOSITE })) this.progs[name] = this.compile(fs)
     gl.bindVertexArray(gl.createVertexArray())
     this.input = this.makeTex()
   }
@@ -149,7 +171,8 @@ class GLFx {
     return t
   }
 
-  private pass(prog: string, out: Target | null, inputs: WebGLTexture[], uniforms: Record<string, number | number[]>) {
+  private pass(prog: string, out: Target | null, inputs: WebGLTexture[], uniforms: Record<string, number | number[]>,
+    vec3s: Record<string, [number, number, number]> = {}) {
     const gl = this.gl
     const { p, loc } = this.progs[prog]
     gl.useProgram(p)
@@ -168,11 +191,18 @@ class GLFx {
       else if (Array.isArray(v)) gl.uniform2f(l, v[0], v[1])
       else gl.uniform1f(l, v)
     }
+    for (const [name, v] of Object.entries(vec3s)) {
+      if (!loc.has(name)) loc.set(name, gl.getUniformLocation(p, name))
+      gl.uniform3f(loc.get(name)!, ...v)
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3)
   }
 
-  /** Applies the effects in place on target. `unit` converts work pixels to output pixels. */
-  apply(target: HTMLCanvasElement, s: DitherSettings, unit: number, dynamic: boolean) {
+  /**
+   * Applies the effects in place on target. `unit` converts work pixels to output pixels;
+   * `cell` is the dither cell size in output pixels and `gapColor` what shows between shaped cells.
+   */
+  apply(target: HTMLCanvasElement, s: DitherSettings, unit: number, dynamic: boolean, cell: [number, number], gapColor: string) {
     const gl = this.gl
     const w = target.width, h = target.height
     this.canvas.width = w
@@ -185,7 +215,16 @@ class GLFx {
     const size = [w, h]
     const a = this.target('a', w, h)
     const b = this.target('b', w, h)
-    this.pass('PREP', a, [this.input], {
+    let src = this.input
+    if (hasCellShape(s)) {
+      const shapes = { square: 0, dot: 1, rounded: 2, diamond: 3 }
+      this.pass('SHAPE', b, [this.input], {
+        uSize: size, uCellPx: [Math.max(1, cell[0]), Math.max(1, cell[1])],
+        uShape: shapes[s.cellShape ?? 'square'], uGap: Math.min(0.9, s.cellGap ?? 0),
+      }, { uGapColor: hexToRgb(gapColor) })
+      src = b.tex
+    }
+    this.pass('PREP', a, [src], {
       uSize: size, uAmp: (s.wave ?? 0) * unit, uPeriod: Math.max(2, (s.wavePeriod ?? 40) * unit), uChroma: (s.chroma ?? 0) * unit,
     })
     const blurSigma = (s.blur ?? 0) * unit
