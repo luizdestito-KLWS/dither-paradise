@@ -70,9 +70,12 @@ export function diffuse(
   work.height = h
   workCtx.imageSmoothingEnabled = true
   workCtx.imageSmoothingQuality = 'high'
+  workCtx.clearRect(0, 0, w, h)
   workCtx.drawImage(source, sx, sy, sw, sh, 0, 0, w, h)
   const img = workCtx.getImageData(0, 0, w, h)
   const d = img.data
+  // Error diffusion has no threshold to share, so alpha is simply cut at 50%.
+  const alpha = Uint8Array.from({ length: w * h }, (_, i) => (d[i * 4 + 3] >= 128 ? 255 : 0))
   const n = w * h
   const mono = s.colorMode === 'mono'
   const ch = mono ? 1 : 3
@@ -193,13 +196,14 @@ export function diffuse(
       const v = orig[i * 3 + k] + (out[i * 3 + k] - orig[i * 3 + k]) * s.mix
       d[i * 4 + k] = v * 255
     }
-    d[i * 4 + 3] = 255
+    d[i * 4 + 3] = alpha[i]
   }
   workCtx.putImageData(img, 0, 0)
 
   if (target.width !== outW) target.width = outW
   if (target.height !== outH) target.height = outH
   const ctx = target.getContext('2d')!
+  ctx.clearRect(0, 0, outW, outH)
   ctx.imageSmoothingEnabled = false
   ctx.drawImage(work, 0, 0, outW, outH)
 }

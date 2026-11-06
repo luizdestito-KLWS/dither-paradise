@@ -66,6 +66,7 @@ export type ColorMode = 'mono' | 'original' | 'palette'
 
 export type RenderMode = 'dither' | 'ascii'
 export type CellShape = 'square' | 'dot' | 'rounded' | 'diamond'
+export type AlphaMode = 'keep' | 'fill'
 export type AsciiFont = 'mono' | 'pixel' | 'gothic' | 'rounded'
 
 export interface AsciiSetDef { id: string; label: string; chars: string }
@@ -104,6 +105,9 @@ export interface DitherSettings {
   cellShape: CellShape
   /** Gap between cells, as a fraction of the cell (0 = touching). */
   cellGap: number
+  /** Transparent sources: keep the alpha (dithered edges) or flatten onto alphaFill. */
+  alphaMode: AlphaMode
+  alphaFill: string
   /** Stretch the image's tones to full black/white before dithering. */
   autoContrast: boolean
   /** Internal: black/white points measured from the source when autoContrast is on. */
@@ -195,6 +199,8 @@ export const DEFAULT_DITHER: DitherSettings = {
   style: 'bayer4',
   cellShape: 'square',
   cellGap: 0,
+  alphaMode: 'keep',
+  alphaFill: '#ffffff',
   autoContrast: true,
   pixelSize: 3,
   patternSize: 7,

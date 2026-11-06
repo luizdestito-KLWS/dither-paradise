@@ -33,6 +33,8 @@ export interface Item {
   dither: DitherSettings
   /** Output pixels per source pixel on export. */
   exportScale: number
+  /** The source has transparent pixels. */
+  hasAlpha?: boolean
   text?: TextProps
 }
 
@@ -233,7 +235,7 @@ export const useStore = create<State>((set, get) => ({
   },
 }))
 
-export function newMediaItem(src: string, kind: MediaKind, w: number, h: number, name: string, x: number, y: number): Item {
+export function newMediaItem(src: string, kind: MediaKind, w: number, h: number, name: string, x: number, y: number, hasAlpha = false): Item {
   const longest = Math.max(w, h)
   const fit = Math.min(1, 380 / longest)
   return {
@@ -250,6 +252,7 @@ export function newMediaItem(src: string, kind: MediaKind, w: number, h: number,
       asciiCell: Math.max(3, Math.round(longest / 70)),
     },
     exportScale: 1,
+    hasAlpha,
   }
 }
 

@@ -7,6 +7,19 @@ export interface Media {
   h: number
   /** Bumped by requestVideoFrameCallback so the canvas only re-renders on new frames. */
   frame: number
+  /** The source has transparent pixels (PNG/GIF/WebP with alpha). */
+  alpha: boolean
+}
+
+/** Checks a downscaled copy for any pixel that isn't fully opaque. */
+function detectAlpha(el: HTMLImageElement) {
+  const c = document.createElement('canvas')
+  c.width = c.height = 96
+  const g = c.getContext('2d', { willReadFrequently: true })!
+  g.drawImage(el, 0, 0, 96, 96)
+  const d = g.getImageData(0, 0, 96, 96).data
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 250) return true
+  return false
 }
 
 const registry = new Map<string, Media>()
@@ -24,7 +37,7 @@ function attach(el: HTMLElement) {
 
 export const getMedia = (src?: string) => (src ? registry.get(src) : undefined)
 
-export async function loadFile(file: File): Promise<{ src: string; kind: MediaKind; w: number; h: number }> {
+export async function loadFile(file: File): Promise<{ src: string; kind: MediaKind; w: number; h: number; alpha: boolean }> {
   const src = URL.createObjectURL(file)
   if (file.type.startsWith('video/')) {
     const v = document.createElement('video')
@@ -38,14 +51,14 @@ export async function loadFile(file: File): Promise<{ src: string; kind: MediaKi
       v.onloadeddata = () => res()
       v.onerror = () => rej(new Error('Não foi possível abrir o vídeo ' + file.name))
     })
-    const m: Media = { el: v, kind: 'video', w: v.videoWidth, h: v.videoHeight, frame: 0 }
+    const m: Media = { el: v, kind: 'video', w: v.videoWidth, h: v.videoHeight, frame: 0, alpha: false }
     registry.set(src, m)
     if ('requestVideoFrameCallback' in v) {
       const tick = () => { m.frame++; v.requestVideoFrameCallback(tick) }
       v.requestVideoFrameCallback(tick)
     }
     v.play().catch(() => {})
-    return { src, kind: 'video', w: m.w, h: m.h }
+    return { src, kind: 'video', w: m.w, h: m.h, alpha: false }
   }
   const img = new Image()
   img.src = src
@@ -54,8 +67,9 @@ export async function loadFile(file: File): Promise<{ src: string; kind: MediaKi
   })
   const kind: MediaKind = file.type === 'image/gif' ? 'gif' : 'image'
   if (kind === 'gif') attach(img)
-  registry.set(src, { el: img, kind, w: img.naturalWidth, h: img.naturalHeight, frame: 0 })
-  return { src, kind, w: img.naturalWidth, h: img.naturalHeight }
+  const alpha = file.type !== 'image/jpeg' && detectAlpha(img)
+  registry.set(src, { el: img, kind, w: img.naturalWidth, h: img.naturalHeight, frame: 0, alpha })
+  return { src, kind, w: img.naturalWidth, h: img.naturalHeight, alpha }
 }
 
 const probe = document.createElement('canvas')

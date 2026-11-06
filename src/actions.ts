@@ -24,7 +24,7 @@ export async function importFiles(files: File[], at?: { x: number; y: number }) 
   for (const f of media) {
     try {
       const m = await loadFile(f)
-      loaded.push(newMediaItem(m.src, m.kind, m.w, m.h, f.name.replace(/\.[^.]+$/, ''), 0, 0))
+      loaded.push(newMediaItem(m.src, m.kind, m.w, m.h, f.name.replace(/\.[^.]+$/, ''), 0, 0, m.alpha))
     } catch (e) {
       store.showToast((e as Error).message)
     }

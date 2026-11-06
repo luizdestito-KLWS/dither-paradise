@@ -283,6 +283,37 @@ const DUOS: [string, string, string][] = [
   ['Fósforo', '#000000', '#33ff66'], ['Ciano', '#00060f', '#5ff3ff'], ['Lava', '#0a0000', '#ff7a1a'],
 ]
 
+const FILL_SWATCHES = ['#ffffff', '#000000', '#f4f1ea', '#111114', '#33bdee', '#ff78b4']
+
+/** Only shown for sources with transparent pixels: keep the alpha or flatten onto a colour. */
+function AlphaSection({ list }: { list: Item[] }) {
+  const { d, set, commit, mixed } = useDitherEdit(list)
+  if (!list.some((i) => i.hasAlpha)) return null
+  const mode = d.alphaMode ?? 'keep'
+  return (
+    <div className="alpha-section">
+      <h4 className="group-title">Transparência</h4>
+      <Seg value={mixed('alphaMode') ? null : mode} onChange={(v) => commit({ alphaMode: v })} options={[
+        { value: 'keep', label: 'Manter transparente', icon: <i className="checker-ico" /> },
+        { value: 'fill', label: 'Preencher com cor', icon: <i className="fill-ico" style={{ background: d.alphaFill }} /> },
+      ]} />
+      {mode === 'fill' && (
+        <div className="palette-edit">
+          {FILL_SWATCHES.map((c) => (
+            <button key={c} className={'diamond-btn' + (d.alphaFill === c ? ' on' : '')} onClick={() => { blip('tap'); commit({ alphaFill: c }) }}>
+              <Diamond color={c} size={24} />
+            </button>
+          ))}
+          <Diamond color={d.alphaFill} size={24} title="Cor personalizada" onChange={(c) => set({ alphaFill: c })} />
+        </div>
+      )}
+      <p className="hint">{mode === 'keep'
+        ? 'O fundo continua transparente no PNG exportado; as bordas suaves também ganham dither.'
+        : 'O fundo sai exatamente nesta cor, atrás da imagem com dither.'}</p>
+    </div>
+  )
+}
+
 function ColorTab({ list }: { list: Item[] }) {
   const { d, set, commit, mixed } = useDitherEdit(list)
   return (
@@ -323,6 +354,7 @@ function ColorTab({ list }: { list: Item[] }) {
             <p className="hint">Dica: use o Conta-gotas na barra lateral para puxar cores direto da imagem.</p>
           </>
         )}
+        <AlphaSection list={list} />
       </div>
       <div className="col scroll">
         {d.colorMode === 'mono' && (

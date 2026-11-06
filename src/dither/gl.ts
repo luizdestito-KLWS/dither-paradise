@@ -36,9 +36,14 @@ const vec3 LUMA = vec3(0.299, 0.587, 0.114);
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 
+// Alpha of the most recent sampleAt(); the source texture is premultiplied so filtering never darkens edges.
+float srcA = 1.0;
+
 vec3 sampleAt(vec2 uv) {
   uv = clamp(uv, 0.0, 1.0);
-  return textureLod(uSrc, uCrop.xy + uv * uCrop.zw, uLod).rgb;
+  vec4 p = textureLod(uSrc, uCrop.xy + uv * uCrop.zw, uLod);
+  srcA = p.a;
+  return p.rgb / max(p.a, 1e-4);
 }
 
 vec3 adjust(vec3 c) {
@@ -77,6 +82,8 @@ vec4 ascii(vec2 fp) {
   vec2 cell = floor(g);
   vec2 local = fract(g);
   vec3 c = adjust(sampleAt((cell + 0.5) * cellSize / uOut));
+  // Transparent cells stay empty.
+  float cellA = step(0.5, srcA);
   float l = dot(c, LUMA);
   float idx, a;
   // Explicit gradients from the continuous coordinate, or mip selection breaks at cell borders.
@@ -96,8 +103,8 @@ vec4 ascii(vec2 fp) {
   if (uColorMode == 0) glyph = uLight;
   else if (uColorMode == 1) glyph = vivid;
   else glyph = nearestPal(vivid);
-  if (uBgClear) return vec4(glyph, a);
-  return vec4(mix(uBg, glyph, a), 1.0);
+  if (uBgClear) return vec4(glyph, a * cellA);
+  return vec4(mix(uBg, glyph, a), cellA);
 }
 
 void main() {
@@ -105,11 +112,13 @@ void main() {
   vec2 fp = vec2(vUv.x, 1.0 - vUv.y) * uOut;
   if (uAscii) {
     vec4 r = ascii(fp);
-    outColor = uBgClear ? r : vec4(mix(adjust(sampleAt(fp / uOut)), r.rgb, uMix), 1.0);
+    vec3 o = adjust(sampleAt(fp / uOut));
+    outColor = uBgClear ? r : vec4(mix(o, r.rgb, uMix), mix(srcA, r.a, uMix));
     return;
   }
   vec3 c;
   float t;
+  float cellA = 1.0;
   if (uStyle >= 6 && uStyle <= 8) {
     float a = radians(uAngle);
     mat2 rot = mat2(cos(a), -sin(a), sin(a), cos(a));
@@ -118,6 +127,7 @@ void main() {
     vec2 local = fract(r / uPat) - 0.5;
     vec2 center = transpose(rot) * ((cell + 0.5) * uPat);
     c = adjust(sampleAt(center / uOut));
+    cellA = srcA;
     // Euclidean spot: round dots that merge into a checkerboard at 50% and invert past it.
     if (uStyle == 6) t = clamp(0.5 - 0.25 * (cos(6.2831853 * local.x) + cos(6.2831853 * local.y)), 0.0, 0.999);
     else if (uStyle == 7) t = abs(local.y) * 2.0;
@@ -125,6 +135,7 @@ void main() {
   } else {
     vec2 cell = floor(fp / uPx);
     c = adjust(sampleAt((cell + 0.5) * uPx / uOut));
+    cellA = srcA;
     if (uStyle == 10) t = texelFetch(uMap, ivec2(mod(cell, uMapN)), 0).r;
     else if (uStyle == 11) t = (hash(cell) + hash(cell + 17.17)) * 0.5;
     else if (uStyle == 4) t = ign(cell);
@@ -146,8 +157,11 @@ void main() {
   } else {
     q = nearestPal(c + (th - 0.5) * uSpread);
   }
+  // Alpha is dithered with the same threshold, so soft edges break into pixels too.
+  float qa = clamp(sfloor(cellA + th, aa), 0.0, 1.0);
   vec3 orig = adjust(sampleAt(fp / uOut));
-  outColor = vec4(mix(orig, q, uMix), 1.0);
+  float oa = srcA;
+  outColor = vec4(mix(orig, q, uMix), mix(oa, qa, uMix));
 }`
 
 type Source = HTMLImageElement | HTMLVideoElement | HTMLCanvasElement
@@ -215,7 +229,9 @@ class GLDither {
     gl.bindTexture(gl.TEXTURE_2D, tex)
     if (fresh || dynamic) {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)

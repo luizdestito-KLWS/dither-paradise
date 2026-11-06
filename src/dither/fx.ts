@@ -4,6 +4,7 @@ import { DitherSettings, hasCellShape, hexToRgb } from './types'
  * Post effects that run on the dithered frame: wave distortion, chromatic aberration,
  * blur, bloom ("luminância") and CRT scanlines / RGB mask / vignette / grain.
  * Textures are kept in image space (row 0 = top); only the final pass flips for the canvas.
+ * Everything is premultiplied alpha until the last pass, so transparent sources stay transparent.
  */
 
 const VS = `#version 300 es
@@ -32,7 +33,7 @@ void main() {
   vec2 p = vUv * uSize;
   vec2 cell = floor(p / uCellPx);
   vec2 local = (p - cell * uCellPx) / uCellPx - 0.5;
-  vec3 c = texture(uTex, (cell + 0.5) * uCellPx / uSize).rgb;
+  vec4 c = texture(uTex, (cell + 0.5) * uCellPx / uSize);
   float half_ = 0.5 * (1.0 - uGap);
   float d;
   if (uShape < 0.5) d = sdBox(local, vec2(half_), 0.0);
@@ -41,7 +42,7 @@ void main() {
   else d = (abs(local.x) + abs(local.y)) * 0.7071 - half_ * 0.7071;
   float aa = 0.75 / min(uCellPx.x, uCellPx.y);
   float m = 1.0 - smoothstep(-aa, aa, d);
-  o = vec4(mix(uGapColor, c, m), 1.0);
+  o = vec4(mix(uGapColor * c.a, c.rgb, m), c.a);
 }`
 
 const PREP = HEAD + `
@@ -51,7 +52,9 @@ void main() {
   p.x += uAmp * sin(6.2831853 * p.y / uPeriod);
   vec2 uv = p / uSize;
   vec2 off = vec2(uChroma / uSize.x, 0.0);
-  o = vec4(texture(uTex, uv + off).r, texture(uTex, uv).g, texture(uTex, uv - off).b, 1.0);
+  vec4 mid = texture(uTex, uv);
+  vec4 r = texture(uTex, uv + off), b = texture(uTex, uv - off);
+  o = vec4(r.r, mid.g, b.b, max(mid.a, max(r.a, b.a)));
 }`
 
 /** Bright pass, downsampling with a 4-tap box so thin dither dots still feed the glow. */
@@ -66,7 +69,7 @@ void main() {
   }
   c *= 0.25;
   float m = max(c.r, max(c.g, c.b));
-  o = vec4(c * smoothstep(uThreshold, uThreshold + 0.25, m), 1.0);
+  o = vec4(c * smoothstep(uThreshold, uThreshold + 0.25, m), 1.0);  // light only; alpha unused
 }`
 
 const BLUR = HEAD + `
@@ -94,10 +97,15 @@ uniform float uGlow, uScan, uScanSize, uMask, uVig, uGrain, uSeed;
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
-  vec3 c = texture(uTex, uv).rgb;
+  vec4 base = texture(uTex, uv);
+  vec3 c = base.rgb;
+  float alpha = base.a;
   vec3 bl = texture(uBloom1, uv).rgb * 0.8 + texture(uBloom2, uv).rgb * 0.9;
   bl *= uGlow;
-  c = 1.0 - (1.0 - c) * (1.0 - clamp(bl, 0.0, 1.0)) + bl * 0.25;
+  bl = clamp(bl, 0.0, 1.0);
+  c = c + bl - c * bl + bl * 0.25;
+  // Glow spills onto transparent areas as semi-opaque light.
+  alpha = max(alpha, max(bl.r, max(bl.g, bl.b)));
   vec2 p = uv * uSize;
   if (uScan > 0.0) {
     float s = 0.5 + 0.5 * cos(6.2831853 * p.y / uScanSize);
@@ -110,8 +118,9 @@ void main() {
   }
   vec2 d = uv - 0.5;
   c *= 1.0 - uVig * smoothstep(0.15, 0.75, dot(d, d) * 2.0);
-  c += (hash(p + uSeed) - 0.5) * uGrain * 0.3;
-  o = vec4(clamp(c, 0.0, 1.0), 1.0);
+  c += (hash(p + uSeed) - 0.5) * uGrain * 0.3 * alpha;
+  // Back to straight alpha for the canvas.
+  o = vec4(clamp(c / max(alpha, 1e-4), 0.0, 1.0), alpha);
 }`
 
 interface Target { tex: WebGLTexture; fb: WebGLFramebuffer; w: number; h: number }
@@ -210,7 +219,9 @@ class GLFx {
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.input)
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, target)
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
 
     const size = [w, h]
     const a = this.target('a', w, h)

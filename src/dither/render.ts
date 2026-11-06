@@ -35,11 +35,18 @@ const probeCtx = probe.getContext('2d', { willReadFrequently: true })!
 function autoLevels(el: CanvasImageSource, key: string, sx: number, sy: number, sw: number, sh: number): [number, number] {
   const hit = levelCache.get(key)
   if (hit) return hit
+  probeCtx.clearRect(0, 0, 64, 64)
   probeCtx.drawImage(el, sx, sy, sw, sh, 0, 0, 64, 64)
   const d = probeCtx.getImageData(0, 0, 64, 64).data
   const hist = new Uint32Array(256)
-  for (let i = 0; i < d.length; i += 4) hist[Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)]++
-  const n = 64 * 64
+  let n = 0
+  // Transparent pixels aren't part of the picture, so they don't count towards black/white points.
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) continue
+    hist[Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114)]++
+    n++
+  }
+  if (!n) return [0, 1]
   let acc = 0, lo = 0, hi = 255
   for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.005) { lo = v; break } }
   acc = 0
@@ -50,6 +57,17 @@ function autoLevels(el: CanvasImageSource, key: string, sx: number, sy: number, 
   if (levelCache.size > 200) levelCache.clear()
   levelCache.set(key, out)
   return out
+}
+
+/** "Preencher com cor": paint the chosen colour behind the finished result, so it comes out exact. */
+function fillBehind(target: HTMLCanvasElement, s: DitherSettings) {
+  if (s.alphaMode !== 'fill') return
+  const ctx = target.getContext('2d')!
+  ctx.save()
+  ctx.globalCompositeOperation = 'destination-over'
+  ctx.fillStyle = s.alphaFill ?? '#ffffff'
+  ctx.fillRect(0, 0, target.width, target.height)
+  ctx.restore()
 }
 
 /** What shows between shaped cells: the darkest colour the item can output. */
@@ -86,9 +104,11 @@ export function renderItem(it: Item, target: HTMLCanvasElement, opts: RenderOpts
     if (target.width !== w) target.width = w
     if (target.height !== h) target.height = h
     const ctx = target.getContext('2d')!
+    ctx.clearRect(0, 0, w, h)
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(m.el, sx, sy, sw, sh, 0, 0, w, h)
+    fillBehind(target, s)
     return true
   }
 
@@ -113,5 +133,6 @@ export function renderItem(it: Item, target: HTMLCanvasElement, opts: RenderOpts
     const unit = k * Math.max(1, Math.max(sw, sh) / 480)
     glFx().apply(target, s, unit, m.kind !== 'image', cell, gapColorFor(s))
   }
+  fillBehind(target, s)
   return true
 }

@@ -38,6 +38,8 @@
   --glass: rgba(255, 255, 255, 0.86);
   --scrim: rgba(220, 230, 238, 0.6);
   --shadow: rgba(40, 60, 85, 0.16);
+  --checker-a: #ffffff;
+  --checker-b: #e3e8ee;
   --bevel: inset 0 1px 0 var(--hl), inset 0 -2px 0 rgba(30, 50, 70, 0.07);
   --lift: 0 3px 0 var(--edge), 0 7px 14px rgba(40, 60, 85, 0.14);
   --lift-pressed: 0 1px 0 var(--edge), 0 2px 5px rgba(40, 60, 85, 0.14);
@@ -69,6 +71,8 @@
   --glass: rgba(34, 38, 45, 0.86);
   --scrim: rgba(8, 10, 12, 0.6);
   --shadow: rgba(0, 0, 0, 0.45);
+  --checker-a: #2a2f37;
+  --checker-b: #22262d;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -97,6 +101,8 @@
     --glass: rgba(34, 38, 45, 0.86);
     --scrim: rgba(8, 10, 12, 0.6);
     --shadow: rgba(0, 0, 0, 0.45);
+  --checker-a: #2a2f37;
+  --checker-b: #22262d;
   }
 }
 
@@ -298,7 +304,10 @@ canvas { display: block; }
   image-rendering: pixelated;
   border-radius: 3px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 22px rgba(30, 50, 70, 0.2);
-  background: var(--surface);
+  /* Checkerboard so transparent areas read as transparent, not white. */
+  background-color: var(--checker-a);
+  background-image: conic-gradient(var(--checker-b) 25%, transparent 0 50%, var(--checker-b) 0 75%, transparent 0);
+  background-size: 16px 16px;
 }
 .text-item {
   line-height: 1.15;
@@ -601,6 +610,11 @@ canvas { display: block; }
 .preset-chip .x:hover { opacity: 1; }
 .preset-add { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 99px; font-size: 12px; color: var(--ink-soft); box-shadow: inset 0 0 0 1.5px var(--ink-faint); border: 0; }
 .preset-add:hover { color: var(--wii-deep); box-shadow: inset 0 0 0 1.5px var(--wii); }
+
+/* transparency */
+.alpha-section { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; border-top: 1.5px dashed var(--line); }
+.checker-ico, .fill-ico { display: inline-block; width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+.checker-ico { background: conic-gradient(#c8d0d8 25%, #fff 0 50%, #c8d0d8 0 75%, #fff 0); background-size: 6px 6px; }
 
 /* cell shapes */
 .shape-row .seg button { padding: 6px 10px; }
